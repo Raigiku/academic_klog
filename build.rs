@@ -1,0 +1,30 @@
+fn main() {
+    windows::build!(
+        Windows::Win32::KeyboardAndMouseInput::{
+            GetAsyncKeyState,
+            GetKeyboardLayout,
+        },
+        Windows::Win32::SystemServices::{
+            PWSTR,
+            OpenProcess,
+            PROCESS_ACCESS_RIGHTS,
+        },
+        Windows::Win32::ProcessStatus::{
+            K32GetProcessImageFileNameW,
+        },
+        Windows::Win32::WindowsAndMessaging::{
+            HWND,
+            GetWindowTextLengthW,
+            GetWindowTextW,
+            GetWindowThreadProcessId,
+            GetForegroundWindow,
+        },
+        Windows::Win32::WindowsProgramming::{
+            CloseHandle,
+        },
+        Windows::Win32::IpHelper::{
+            GetAdaptersInfo,
+            IP_ADAPTER_INFO,
+        },
+    );
+}
