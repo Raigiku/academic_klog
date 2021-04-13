@@ -7,8 +7,11 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-windows = "0.7.0"
-chrono = "0.4"
+windows = "0.7"
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.11", features = ["json"] }
+tokio = { version = "1.4", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
 
 [build-dependencies]
 windows = "0.7"

