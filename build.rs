@@ -8,6 +8,7 @@ fn main() {
             PWSTR,
             OpenProcess,
             PROCESS_ACCESS_RIGHTS,
+            GetConsoleWindow,
         },
         Windows::Win32::ProcessStatus::{
             K32GetProcessImageFileNameW,
@@ -18,6 +19,8 @@ fn main() {
             GetWindowTextW,
             GetWindowThreadProcessId,
             GetForegroundWindow,
+            ShowWindow,
+            SHOW_WINDOW_CMD,
         },
         Windows::Win32::WindowsProgramming::{
             CloseHandle,
