@@ -174,7 +174,7 @@ fn virtual_key_code_to_string(virtual_key_code: i32) -> Option<String> {
             0xbb => "+",
             0xbc => ",",
             0xbd => "-",
-            0xbe => "",
+            0xbe => ".",
             0xbf => "[VK_OEM_2]",
             0xc0 => "[VK_OEM_3]",
             0xdb => "[VK_OEM_4]",
